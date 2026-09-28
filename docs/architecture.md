@@ -16,7 +16,7 @@ flowchart TB
   end
   K -->|queue backlog| P
   CA -->|pending pods| W
-  P --> Codex[Codex CLI: web research]
+  P --> Codex[Codex backend: web research]
   P --> Auth[Codex login Secret]
 ```
 
@@ -34,15 +34,17 @@ flowchart TB
 1. The API authenticates the request, stores a job, and returns its ID.
 2. Redis Streams queues the job.
 3. KEDA requests worker pods. Cluster Autoscaler creates a VM if needed.
-4. The Go worker runs an Eino chat agent whose model adapter calls `codex exec` with web search.
+4. The Go worker runs an Eino chat agent whose model adapter streams directly from the Codex backend with web search.
 5. The worker stores the report in Redis. The client polls the API for it.
 6. After idle cooldowns, worker pods and elastic VMs are removed.
 
 ## Isolation
 
-System services stay on the fixed system VM. Labels and taints reserve elastic VMs for research. Each Codex run gets a temporary workspace and a read-only command sandbox, with shell tools disabled.
+System services stay on the fixed system VM. Labels and taints reserve elastic VMs for research. The worker makes HTTPS model requests; it does not give the model command or file tools.
 
-The worker mounts a writable copy of your file-backed Codex login. Codex refreshes it when needed; the worker saves the new copy to an encrypted Kubernetes Secret for the next pod. Its service account can patch only that Secret. A single active worker avoids concurrent refreshes of the same login.
+The worker mounts a writable copy of your file-backed Codex login. It refreshes the ChatGPT OAuth token when needed and saves the new copy to an encrypted Kubernetes Secret for the next pod. Its service account can patch only that Secret. A single active worker avoids concurrent refreshes of the same login.
+
+The direct Codex backend protocol is based on [Pi's implementation](https://github.com/badlogic/pi-mono/tree/main/packages/ai/src). It is not a documented public OpenAI API and can change without notice.
 
 SSH and the Kubernetes API are restricted to operator CIDRs. Redis and the image registry are private. Baseline VMs remain running when there are no jobs.
 

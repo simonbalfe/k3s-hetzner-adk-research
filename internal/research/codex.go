@@ -1,13 +1,14 @@
 package research
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
-	"path/filepath"
+	"net/http"
 	"strings"
 
 	"github.com/cloudwego/eino/adk"
@@ -26,8 +27,8 @@ type codexModel struct {
 }
 
 func NewCodex(ctx context.Context, name string) (*Codex, error) {
-	if _, err := exec.LookPath("codex"); err != nil {
-		return nil, fmt.Errorf("find Codex CLI: %w", err)
+	if name == "" {
+		name = "gpt-5.6-sol"
 	}
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:        "research",
@@ -99,32 +100,96 @@ func (m *codexModel) Stream(ctx context.Context, messages []*schema.Message, opt
 }
 
 func (m *codexModel) run(ctx context.Context, prompt string) (string, error) {
-	dir, err := os.MkdirTemp("", "research-")
+	data, err := json.Marshal(map[string]any{
+		"model":        m.name,
+		"store":        false,
+		"stream":       true,
+		"instructions": instruction,
+		"input": []map[string]any{{
+			"role":    "user",
+			"content": []map[string]string{{"type": "input_text", "text": prompt}},
+		}},
+		"tools": []map[string]string{{"type": "web_search"}},
+	})
 	if err != nil {
-		return "", fmt.Errorf("create research workspace: %w", err)
+		return "", fmt.Errorf("encode research request: %w", err)
 	}
-	defer os.RemoveAll(dir)
-	output := filepath.Join(dir, "report.md")
-	args := []string{"exec", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "-c", `web_search="live"`, "-c", "features.shell_tool=false", "--cd", dir, "--output-last-message", output, "-"}
-	if m.name != "" {
-		args = append([]string{"--model", m.name}, args...)
+	for attempt := range 2 {
+		token, accountID, err := accessToken(ctx, attempt > 0)
+		if err != nil {
+			return "", err
+		}
+		report, unauthorized, err := requestReport(ctx, data, token, accountID)
+		if unauthorized && attempt == 0 {
+			continue
+		}
+		return report, err
 	}
-	cmd := exec.CommandContext(ctx, "codex", args...)
-	cmd.Stdin = strings.NewReader(prompt)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	runErr := cmd.Run()
-	if err := persistAuth(ctx); err != nil {
-		return "", fmt.Errorf("persist Codex login: %w", err)
-	}
-	if runErr != nil {
-		return "", fmt.Errorf("run Codex research: %w", runErr)
-	}
-	data, err := os.ReadFile(output)
+	return "", errors.New("Codex authentication failed")
+}
+
+func requestReport(ctx context.Context, body []byte, token, accountID string) (string, bool, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://chatgpt.com/backend-api/codex/responses", bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("read research report: %w", err)
+		return "", false, fmt.Errorf("prepare Codex request: %w", err)
 	}
-	report := strings.TrimSpace(string(data))
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("chatgpt-account-id", accountID)
+	request.Header.Set("originator", "research-agents")
+	request.Header.Set("OpenAI-Beta", "responses=experimental")
+	request.Header.Set("Accept", "text/event-stream")
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return "", false, fmt.Errorf("request Codex research: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusUnauthorized {
+		return "", true, errors.New("Codex login was rejected")
+	}
+	if response.StatusCode != http.StatusOK {
+		return "", false, fmt.Errorf("Codex research returned %s", response.Status)
+	}
+	report, err := readReport(response.Body)
+	if err != nil {
+		return "", false, err
+	}
+	return report, false, nil
+}
+
+func readReport(body io.Reader) (string, error) {
+	var output strings.Builder
+	var completed bool
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 64<<10), 2<<20)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		var event struct {
+			Type  string `json:"type"`
+			Delta string `json:"delta"`
+		}
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event); err != nil {
+			return "", fmt.Errorf("decode Codex event: %w", err)
+		}
+		switch event.Type {
+		case "response.output_text.delta":
+			output.WriteString(event.Delta)
+		case "response.completed":
+			completed = true
+		case "response.failed":
+			return "", errors.New("Codex research failed")
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("read Codex response: %w", err)
+	}
+	report := strings.TrimSpace(output.String())
+	if !completed {
+		return "", errors.New("Codex response ended before completion")
+	}
 	if report == "" {
 		return "", errors.New("Codex returned an empty report")
 	}

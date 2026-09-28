@@ -1,6 +1,6 @@
 # Research agents on Hetzner
 
-A small Go API and Eino research agent on your own k3s cluster. The worker uses the official Codex CLI with your ChatGPT subscription.
+A small Go API and Eino research agent on your own k3s cluster. The Go worker uses your ChatGPT/Codex sign-in without a Codex binary.
 
 ```mermaid
 flowchart LR
@@ -50,3 +50,5 @@ Images build on your system VM and go to your private cluster registry. Use a ne
 - [Architecture](docs/architecture.md): components, scaling, boundaries.
 
 This is a playground: one control plane, one system VM, local storage, no high availability. One Codex job runs at a time on your subscription login.
+
+The direct Codex backend protocol follows Pi's open-source integration. It is not a documented public OpenAI API and may change.

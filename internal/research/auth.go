@@ -20,6 +20,107 @@ import (
 )
 
 const serviceAccountPath = "/var/run/secrets/kubernetes.io/serviceaccount"
+const codexClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
+
+type codexCredentials struct {
+	AuthMode    string    `json:"auth_mode"`
+	LastRefresh time.Time `json:"last_refresh"`
+	Tokens      struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		AccountID    string `json:"account_id"`
+		IDToken      string `json:"id_token"`
+	} `json:"tokens"`
+}
+
+func accessToken(ctx context.Context, forceRefresh bool) (string, string, error) {
+	path := filepath.Join(os.Getenv("CODEX_HOME"), "auth.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", fmt.Errorf("read Codex login: %w", err)
+	}
+	var credentials codexCredentials
+	if err := json.Unmarshal(data, &credentials); err != nil {
+		return "", "", fmt.Errorf("decode Codex login: %w", err)
+	}
+	if credentials.AuthMode != "chatgpt" || credentials.Tokens.RefreshToken == "" || credentials.Tokens.AccountID == "" {
+		return "", "", errors.New("Codex login is not a refreshable ChatGPT session")
+	}
+	if !forceRefresh && tokenValid(credentials.Tokens.AccessToken) {
+		return credentials.Tokens.AccessToken, credentials.Tokens.AccountID, nil
+	}
+	if err := refreshToken(ctx, &credentials); err != nil {
+		return "", "", err
+	}
+	updated, err := json.Marshal(credentials)
+	if err != nil {
+		return "", "", fmt.Errorf("encode refreshed login: %w", err)
+	}
+	if err := os.WriteFile(path, updated, 0600); err != nil {
+		return "", "", fmt.Errorf("save refreshed login: %w", err)
+	}
+	if err := persistAuth(ctx); err != nil {
+		return "", "", err
+	}
+	return credentials.Tokens.AccessToken, credentials.Tokens.AccountID, nil
+}
+
+func tokenValid(token string) bool {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return false
+	}
+	var claims struct {
+		Expires int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return false
+	}
+	return claims.Expires > time.Now().Add(time.Minute).Unix()
+}
+
+func refreshToken(ctx context.Context, credentials *codexCredentials) error {
+	values := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {credentials.Tokens.RefreshToken},
+		"client_id":     {codexClientID},
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://auth.openai.com/oauth/token", strings.NewReader(values.Encode()))
+	if err != nil {
+		return fmt.Errorf("prepare login refresh: %w", err)
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return fmt.Errorf("refresh Codex login: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("refresh Codex login: authentication returned %s", response.Status)
+	}
+	var tokens struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		IDToken      string `json:"id_token"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&tokens); err != nil {
+		return fmt.Errorf("decode refreshed login: %w", err)
+	}
+	if tokens.AccessToken == "" || tokens.RefreshToken == "" {
+		return errors.New("refreshed login is missing tokens")
+	}
+	credentials.Tokens.AccessToken = tokens.AccessToken
+	credentials.Tokens.RefreshToken = tokens.RefreshToken
+	if tokens.IDToken != "" {
+		credentials.Tokens.IDToken = tokens.IDToken
+	}
+	credentials.LastRefresh = time.Now().UTC()
+	return nil
+}
 
 func persistAuth(ctx context.Context) error {
 	host := os.Getenv("KUBERNETES_SERVICE_HOST")

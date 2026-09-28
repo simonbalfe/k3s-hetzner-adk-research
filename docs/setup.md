@@ -2,7 +2,7 @@
 
 ## Requirements
 
-OpenTofu, Ansible, Helm, kubectl, jq, SSH, and a Codex CLI signed in with ChatGPT.
+OpenTofu, Ansible, Helm, kubectl, jq, SSH, and a file-backed ChatGPT/Codex sign-in.
 
 Use a dedicated Hetzner project and its read/write API token. The token determines which project receives resources.
 
@@ -12,6 +12,7 @@ Use a dedicated Hetzner project and its read/write API token. The token determin
 cp .env.example .env
 chmod 600 .env
 ./scripts/init-secrets.sh
+go run ./cmd/login
 cp infra/hetzner/terraform.tfvars.example infra/hetzner/terraform.tfvars
 ```
 
@@ -30,18 +31,18 @@ make platform
 
 ## Codex login
 
-`make platform` seeds your file-backed ChatGPT login into an encrypted Kubernetes Secret. The worker runs the official Codex CLI, which refreshes its own login and saves the updated file back to the Secret after each job. One worker runs at a time for this account. Credentials stay out of images and Git.
+`go run ./cmd/login` performs ChatGPT device-code sign-in and saves credentials in the ignored `.state/codex-auth.json`. `make platform` seeds that file into an encrypted Kubernetes Secret. The Go worker refreshes its login and saves the updated file back to the Secret. One worker runs at a time for this account. Credentials stay out of images and Git. No Codex binary runs locally or in the cluster.
 
 If your login expires or changes:
 
 ```bash
-codex login
+go run ./cmd/login
 ./scripts/sync-codex-auth.sh --replace
 export KUBECONFIG="$PWD/.state/kubeconfig"
 kubectl -n research rollout restart deployment/research-worker
 ```
 
-Use `CODEX_AUTH_FILE` to select another file-backed ChatGPT login. The original local login is only used for initial seeding or an explicit `--replace`; routine platform upgrades preserve the refreshed cluster copy.
+Use `CODEX_AUTH_FILE` to select another file-backed ChatGPT login. The local login is only used for initial seeding or an explicit `--replace`; routine platform upgrades preserve the refreshed cluster copy.
 
 The initial copy and your local Codex login share a session. If both environments refresh it independently, one copy may stop working. A dedicated ChatGPT login session for the cluster avoids that conflict; reseed with `--replace` if Codex returns an authentication error.
 
