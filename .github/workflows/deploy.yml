@@ -1,0 +1,34 @@
+name: Deploy
+run-name: Deploy ${{ inputs.image_tag }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Immutable image tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, linux, adk-research]
+    environment: production
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+      - run: |
+          helm upgrade --install research-agents deploy/chart \
+            --namespace research \
+            --set image.repository="$IMAGE_REPOSITORY" \
+            --set-string image.tag="$IMAGE_TAG" \
+            --atomic \
+            --wait
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          IMAGE_REPOSITORY: ${{ vars.IMAGE_REPOSITORY || '10.20.0.20:30500/research-agents' }}

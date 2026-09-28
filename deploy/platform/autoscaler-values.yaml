@@ -1,0 +1,31 @@
+cloudProvider: hetzner
+image:
+  repository: registry.k8s.io/autoscaling/cluster-autoscaler
+  tag: v1.35.0
+autoscalingGroups:
+  - name: research-agents
+    minSize: 0
+    maxSize: 2
+    instanceType: cpx32
+    region: nbg1
+envFromSecret: cluster-autoscaler-hetzner
+extraArgs:
+  balance-similar-node-groups: true
+  expander: least-waste
+  max-node-provision-time: 15m
+  scale-down-delay-after-add: 5m
+  scale-down-unneeded-time: 5m
+  skip-nodes-with-local-storage: false
+nodeSelector:
+  node-role.kubernetes.io/control-plane: "true"
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Equal
+    value: "true"
+    effect: NoSchedule
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 384Mi

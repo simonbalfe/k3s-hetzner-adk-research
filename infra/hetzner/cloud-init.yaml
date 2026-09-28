@@ -1,0 +1,9 @@
+#cloud-config
+package_update: true
+packages:
+  - ca-certificates
+  - curl
+  - python3
+  - jq
+runcmd:
+  - systemctl enable --now systemd-timesyncd

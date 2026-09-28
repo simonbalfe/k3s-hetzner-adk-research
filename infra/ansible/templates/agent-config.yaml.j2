@@ -1,0 +1,9 @@
+server: "https://{{ control_private_ip }}:6443"
+token: "{{ k3s_token }}"
+node-ip: "{{ private_ip }}"
+flannel-iface: enp7s0
+node-external-ip: "{{ ansible_host }}"
+kubelet-arg:
+  - "cloud-provider=external"
+node-label:
+  - "workload=system"

@@ -1,0 +1,12 @@
+.env
+.state/
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.idea/
+.vscode/
+bin/
+coverage.out
+dist/

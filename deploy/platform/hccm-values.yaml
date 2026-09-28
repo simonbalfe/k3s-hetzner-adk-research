@@ -1,0 +1,12 @@
+networking:
+  enabled: true
+  clusterCIDR: 10.42.0.0/16
+monitoring:
+  enabled: true
+nodeSelector:
+  node-role.kubernetes.io/control-plane: "true"
+additionalTolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Equal
+    value: "true"
+    effect: NoSchedule

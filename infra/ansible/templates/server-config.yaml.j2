@@ -1,0 +1,18 @@
+token: "{{ k3s_token }}"
+node-ip: "{{ private_ip }}"
+advertise-address: "{{ private_ip }}"
+node-external-ip: "{{ ansible_host }}"
+tls-san:
+  - "{{ private_ip }}"
+  - "{{ ansible_host }}"
+disable:
+  - servicelb
+  - traefik
+disable-cloud-controller: true
+kubelet-arg:
+  - "cloud-provider=external"
+write-kubeconfig-mode: "0600"
+secrets-encryption: true
+node-taint:
+  - "node-role.kubernetes.io/control-plane=true:NoSchedule"
+flannel-iface: enp7s0

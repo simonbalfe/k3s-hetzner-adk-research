@@ -1,0 +1,16 @@
+image:
+  repository: 10.20.0.20:30500/research-agents
+  tag: demo-1
+  pullPolicy: IfNotPresent
+existingSecret: research-secrets
+redisURL: redis://redis:6379/0
+model: ""
+api:
+  replicas: 2
+  host: research.example.com
+  ingressEnabled: false
+worker:
+  concurrency: 1
+  timeout: 5m
+  maxReplicas: 2
+  lagPerReplica: 1

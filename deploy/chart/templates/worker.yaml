@@ -1,0 +1,105 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: research-worker
+  labels:
+    app.kubernetes.io/name: research-worker
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: research-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: research-worker
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector:
+        workload: agents
+      tolerations:
+        - key: workload
+          operator: Equal
+          value: agents
+          effect: NoSchedule
+      terminationGracePeriodSeconds: 330
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/app/worker"]
+          env:
+            - name: REDIS_URL
+              value: {{ .Values.redisURL | quote }}
+            - name: CODEX_MODEL
+              value: {{ .Values.model | quote }}
+            - name: WORKER_CONCURRENCY
+              value: {{ .Values.worker.concurrency | quote }}
+            - name: RESEARCH_TIMEOUT
+              value: {{ .Values.worker.timeout | quote }}
+            - name: CODEX_HOME
+              value: /codex
+          volumeMounts:
+            - name: temporary
+              mountPath: /tmp
+            - name: temporary
+              mountPath: /codex
+              subPath: codex
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      initContainers:
+        - name: codex-auth
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ["sh", "-c", "mkdir -p /tmp/codex && cp /auth/auth.json /tmp/codex/auth.json && chmod 600 /tmp/codex/auth.json"]
+          volumeMounts:
+            - name: temporary
+              mountPath: /tmp
+            - name: auth
+              mountPath: /auth
+              readOnly: true
+      volumes:
+        - name: temporary
+          emptyDir: {}
+        - name: auth
+          secret:
+            secretName: codex-auth
+            defaultMode: 0440
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: research-worker
+spec:
+  scaleTargetRef:
+    name: research-worker
+  pollingInterval: 10
+  cooldownPeriod: 360
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 360
+  minReplicaCount: 0
+  maxReplicaCount: {{ .Values.worker.maxReplicas }}
+  triggers:
+    - type: redis-streams
+      metadata:
+        address: redis.research.svc.cluster.local:6379
+        stream: research_jobs
+        consumerGroup: research-workers
+        lagCount: {{ .Values.worker.lagPerReplica | quote }}
+        activationLagCount: "0"

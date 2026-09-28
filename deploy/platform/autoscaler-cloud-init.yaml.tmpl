@@ -1,0 +1,75 @@
+#cloud-config
+packages:
+  - ca-certificates
+  - curl
+write_files:
+  - path: /etc/netplan/60-private.yaml
+    permissions: "0600"
+    content: |
+      network:
+        version: 2
+        ethernets:
+          enp7s0:
+            dhcp4: true
+            optional: true
+  - path: /etc/rancher/k3s/registries.yaml
+    permissions: "0600"
+    content: |
+      mirrors:
+        "__REGISTRY_ADDRESS__":
+          endpoint:
+            - "http://__REGISTRY_ADDRESS__"
+  - path: /etc/systemd/system/k3s-agent.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=K3s Agent
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=exec
+      ExecStart=/usr/local/bin/k3s agent
+      KillMode=process
+      Delegate=yes
+      LimitNOFILE=1048576
+      LimitNPROC=infinity
+      LimitCORE=infinity
+      TasksMax=infinity
+      Restart=always
+      RestartSec=5s
+
+      [Install]
+      WantedBy=multi-user.target
+  - path: /usr/local/sbin/bootstrap-k3s-agent
+    permissions: "0700"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      netplan apply
+      for attempt in {1..30}; do
+        ip -4 -o addr show enp7s0 | grep -q '10.20.' && break
+        sleep 2
+      done
+      private_ip=$(ip -4 -o addr show scope global | awk '$4 ~ /^10\.20\./ {sub(/\/.*/, "", $4); print $4; exit}')
+      test -n "$private_ip"
+      curl -fsSL 'https://github.com/k3s-io/k3s/releases/download/v1.35.8%2Bk3s1/k3s' -o /usr/local/bin/k3s
+      echo '12f81c9bb5b71e098a4f7a2d187e350902a9339a6c3d5e56c20a03f7a417e07f  /usr/local/bin/k3s' | sha256sum -c -
+      chmod 0755 /usr/local/bin/k3s
+      install -d -m 0700 /etc/rancher/k3s
+      cat > /etc/rancher/k3s/config.yaml <<EOF
+      server: "https://__CONTROL_PRIVATE_IP__:6443"
+      token: "__K3S_TOKEN__"
+      node-ip: "$private_ip"
+      flannel-iface: enp7s0
+      kubelet-arg:
+        - "cloud-provider=external"
+      node-label:
+        - "workload=agents"
+      node-taint:
+        - "workload=agents:NoSchedule"
+      EOF
+      systemctl daemon-reload
+      systemctl enable --now k3s-agent
+runcmd:
+  - /usr/local/sbin/bootstrap-k3s-agent
