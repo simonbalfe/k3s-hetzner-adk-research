@@ -30,18 +30,20 @@ make platform
 
 ## Codex login
 
-`make platform` copies your local Codex login into an encrypted Kubernetes Secret. Credentials stay out of images and Git.
+`make platform` seeds your file-backed ChatGPT login into an encrypted Kubernetes Secret. The worker runs the official Codex CLI, which refreshes its own login and saves the updated file back to the Secret after each job. One worker runs at a time for this account. Credentials stay out of images and Git.
 
 If your login expires or changes:
 
 ```bash
 codex login
-./scripts/sync-codex-auth.sh
+./scripts/sync-codex-auth.sh --replace
 export KUBECONFIG="$PWD/.state/kubeconfig"
 kubectl -n research rollout restart deployment/research-worker
 ```
 
-Use `CODEX_AUTH_FILE` to select another file-backed ChatGPT login. Each pod gets a writable temporary copy. Refreshed credentials are not persisted back to the original login; re-sync when needed.
+Use `CODEX_AUTH_FILE` to select another file-backed ChatGPT login. The original local login is only used for initial seeding or an explicit `--replace`; routine platform upgrades preserve the refreshed cluster copy.
+
+The initial copy and your local Codex login share a session. If both environments refresh it independently, one copy may stop working. A dedicated ChatGPT login session for the cluster avoids that conflict; reseed with `--replace` if Codex returns an authentication error.
 
 ## Operate
 

@@ -1,12 +1,12 @@
 # Research agents on Hetzner
 
-A small Go API and research worker on your own k3s cluster. Workers use the official Codex CLI with your ChatGPT subscription.
+A small Go API and Eino research agent on your own k3s cluster. The worker uses the official Codex CLI with your ChatGPT subscription.
 
 ```mermaid
 flowchart LR
   Client --> API[Go API]
   API --> Queue[Redis queue]
-  Queue --> Worker[Go worker + Codex]
+  Queue --> Worker[Eino agent + Codex]
   Worker --> Results[Report in Redis]
   Results --> API
 ```
@@ -49,4 +49,4 @@ Images build on your system VM and go to your private cluster registry. Use a ne
 - [Setup](docs/setup.md): provision, authenticate, deploy, operate.
 - [Architecture](docs/architecture.md): components, scaling, boundaries.
 
-This is a playground: one control plane, one system VM, local storage, no high availability. All Codex jobs share your subscription limits.
+This is a playground: one control plane, one system VM, local storage, no high availability. One Codex job runs at a time on your subscription login.

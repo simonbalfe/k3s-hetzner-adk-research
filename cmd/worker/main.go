@@ -31,7 +31,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	agent, err := research.NewCodex(os.Getenv("CODEX_MODEL"))
+	agent, err := research.NewCodex(ctx, os.Getenv("CODEX_MODEL"))
 	if err != nil {
 		logger.Error("create research agent", "error", err)
 		os.Exit(1)

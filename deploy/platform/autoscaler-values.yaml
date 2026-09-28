@@ -5,7 +5,7 @@ image:
 autoscalingGroups:
   - name: research-agents
     minSize: 0
-    maxSize: 2
+    maxSize: 1
     instanceType: cpx32
     region: nbg1
 envFromSecret: cluster-autoscaler-hetzner

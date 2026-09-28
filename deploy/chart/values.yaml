@@ -12,5 +12,5 @@ api:
 worker:
   concurrency: 1
   timeout: 5m
-  maxReplicas: 2
+  maxReplicas: 1
   lagPerReplica: 1
